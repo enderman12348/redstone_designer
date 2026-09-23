@@ -566,32 +566,155 @@
     #design-name-wrap { display: none; }
   }
 
-  /* ---------- Sign-in gate ---------- */
-  #signin-gate {
-    position: fixed;
-    inset: 0;
+  .signin-hint { color: var(--text-faint); font-size: 11px; }
+
+  /* ---------- Admin badge ---------- */
+  #admin-badge {
+    font-size: 11.5px;
+    color: var(--accent);
+    border: 1px solid var(--accent-soft-border);
+    background: var(--accent-soft);
+    border-radius: 5px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  /* ---------- Inventory bar ---------- */
+  #inventory-bar {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #inventory-bar .label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  #inventory-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .inv-slot {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    border: 1.5px dashed var(--border-strong);
+    background-size: cover;
+    background-position: center;
+    background-color: var(--grid-bg);
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    image-rendering: pixelated;
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+  }
+  .inv-slot.filled { border-style: solid; border-color: var(--border-strong); }
+  .inv-slot.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .inv-slot.drag-over { border-color: var(--accent); }
+  .inv-slot .inv-clear {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
     background: var(--bg);
-    z-index: 200;
+    border: 1px solid var(--border-strong);
+    color: var(--text-faint);
+    font-size: 9px;
+    line-height: 1;
     display: none;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: 0;
   }
-  #signin-gate.visible { display: flex; }
-  .signin-card {
-    max-width: 320px;
-    text-align: center;
+  .inv-slot.filled:hover .inv-clear { display: flex; }
+  .inv-clear:hover { color: var(--danger); }
+
+  /* ---------- Admin: edit / reorder affordances ---------- */
+  .comp-drag-handle {
+    color: var(--text-faint);
+    font-size: 12px;
+    cursor: grab;
+    padding: 0 2px;
+    flex-shrink: 0;
+    line-height: 1;
   }
-  .signin-logo { font-size: 40px; margin-bottom: 8px; }
-  .signin-card h1 { font-size: 18px; margin: 0 0 10px; }
-  .signin-card p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; margin: 0 0 16px; }
-  .signin-hint { color: var(--text-faint) !important; font-size: 11px !important; margin-top: 14px !important; }
+  .comp-item.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
+  .comp-item.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
+  .comp-edit {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .comp-item:hover .comp-edit { opacity: 1; }
+  .comp-edit:hover { color: var(--accent); background: var(--bg); }
+  .group-header { position: relative; }
+  .group-header.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
+  .group-header.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
+  .group-drag-handle {
+    color: var(--text-faint);
+    font-size: 12px;
+    cursor: grab;
+  }
+  .admin-only-hint {
+    padding: 6px 8px 0;
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 1.5;
+  }
 </style>
 
 <!-- ============================================================
      Firebase setup — fill in YOUR OWN project's config below.
      See the setup guide for how to get these values, enable Google
      Sign-In, and deploy the matching Firestore security rules.
+
+     このバージョンでの前提:
+     - ツール自体はログイン不要で誰でも開ける(共有ライブラリは公開読み取り)。
+     - 書き込み(コンポーネントの追加/編集/削除/並べ替え、インベントリ初期値の設定)は
+       「管理者」のみ許可。管理者かどうかはクライアント側では meta/admins ドキュメントの
+       uids 配列で判定するが、実際の書き込み可否は必ず下記のセキュリティルールで
+       サーバー側でも守ること(クライアント側の判定はUI出し分けに過ぎない)。
+     - meta/admins は書き込みルールを allow write: if false; にしてあるため、
+       最初の管理者は Firebase コンソールの Firestore から手動で1件追加する必要がある
+       (uids 配列に自分の Google アカウントの UID を入れる)。
+
+     Firestore セキュリティルール例:
+     ----------------------------------------------------------
+     rules_version = '2';
+     service cloud.firestore {
+       match /databases/{database}/documents {
+         function isAdmin() {
+           return request.auth != null &&
+             request.auth.uid in get(/databases/$(database)/documents/meta/admins).data.uids;
+         }
+         match /components/{id} {
+           allow read: if true;
+           allow write: if isAdmin();
+         }
+         match /meta/admins {
+           allow read: if true;
+           allow write: if false; // Firebaseコンソールから手動で編集する
+         }
+         match /meta/{docId} {
+           allow read: if true;
+           allow write: if isAdmin();
+         }
+       }
+     }
+     ----------------------------------------------------------
      ============================================================ -->
 <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js"></script>
@@ -610,14 +733,18 @@
 </script>
 </head>
 <body>
-<div id="signin-gate">
-  <div class="signin-card">
-    <div class="signin-logo">🔴</div>
-    <h1>回路設計ツール</h1>
-    <p>このツールはGoogleアカウントでサインインしたメンバーだけが使えます。</p>
-    <button class="btn primary" id="signin-btn" style="justify-content:center; width:100%;">Googleでサインイン</button>
-    <p class="signin-hint">許可されていないアカウントの場合、共有ライブラリは読み込めません(ローカル保存のみの動作になります)。</p>
-    <p class="signin-hint" style="cursor:pointer; text-decoration:underline;" id="debug-toggle-link">動作ログを見る(不具合の確認用)</p>
+<!-- 管理者ログイン用モーダル(通常利用時は非表示。ツール自体はログイン不要で使える) -->
+<div class="modal-overlay" id="modal-admin-login">
+  <div class="modal" style="max-width:340px;">
+    <div class="modal-header">
+      <span>管理者ログイン</span>
+      <button class="modal-close" data-close="modal-admin-login">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12.5px; color:var(--text-secondary); line-height:1.6; margin:0 0 14px;">共有ライブラリの編集・並べ替え・インベントリ初期値の設定は、管理者として許可されたGoogleアカウントでログインした場合のみ行えます。閲覧・利用にログインは不要です。</p>
+      <button class="btn primary" id="signin-btn" style="justify-content:center; width:100%;">Googleでログイン</button>
+      <p class="signin-hint" style="cursor:pointer; text-decoration:underline; margin-top:12px;" id="debug-toggle-link">動作ログを見る(不具合の確認用)</p>
+    </div>
   </div>
 </div>
 
@@ -632,15 +759,18 @@
     <button class="btn" id="btn-save">保存</button>
     <button class="btn" id="btn-open">開く</button>
     <div class="sep"></div>
-    <button class="btn" id="btn-export">書き出し</button>
+    <button class="btn" id="btn-export">書き出し(JSON)</button>
     <button class="btn" id="btn-import">読み込み(JSON)</button>
+    <button class="btn" id="btn-export-png">PNG書き出し</button>
     <input type="file" id="import-file-input" accept="application/json" style="display:none">
 
     <div id="topbar-spacer"></div>
 
-    <span id="cloud-status" title="このブラウザにのみ保存されます" style="font-size:11.5px; color:var(--text-faint); display:flex; align-items:center; gap:4px; padding:0 6px; cursor:pointer;">💾 ローカルのみ</span>
+    <span id="cloud-status" title="このブラウザにのみ保存されます" style="font-size:11.5px; color:var(--text-faint); padding:0 6px; cursor:pointer;">ローカルのみ</span>
+    <span id="admin-badge" style="display:none;">管理者モード</span>
     <span id="signin-email" style="font-size:11.5px; color:var(--text-secondary); padding:0 2px;"></span>
-    <button class="btn small" id="signout-btn" style="display:none;">サインアウト</button>
+    <button class="btn small" id="signin-open-btn">管理者ログイン</button>
+    <button class="btn small" id="signout-btn" style="display:none;">ログアウト</button>
 
     <div id="design-name-wrap">編集中: <span id="design-name">新しい設計図</span></div>
 
@@ -659,9 +789,18 @@
 
   <div id="body">
     <div id="sidebar">
+      <div id="inventory-bar">
+        <div class="label">
+          <span>インベントリ</span>
+          <button class="btn small" id="btn-save-inventory-default" style="display:none;">初期状態として保存</button>
+        </div>
+        <div id="inventory-slots"></div>
+      </div>
+
       <div id="sidebar-header">
         <div class="label">コンポーネント</div>
-        <button class="btn primary" id="add-component-btn">＋ 新しいコンポーネント</button>
+        <button class="btn primary" id="add-component-btn" style="display:none;">＋ 新しいコンポーネント</button>
+        <div class="admin-only-hint" id="palette-readonly-hint" style="display:none;">追加・編集・並べ替えは管理者のみ行えます。パレットからインベントリへドラッグして使えます。</div>
       </div>
 
       <div id="tool-panel">
@@ -686,7 +825,7 @@
 <div class="modal-overlay" id="modal-component">
   <div class="modal">
     <div class="modal-header">
-      <span>新しいコンポーネント</span>
+      <span id="modal-component-title">新しいコンポーネント</span>
       <button class="modal-close" data-close="modal-component">✕</button>
     </div>
     <div class="modal-body">
@@ -708,7 +847,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn" data-close="modal-component">キャンセル</button>
-      <button class="btn primary" id="btn-save-component">追加する</button>
+      <button class="btn primary" id="btn-save-component">保存する</button>
     </div>
   </div>
 </div>
@@ -744,6 +883,27 @@
   </div>
 </div>
 
+<!-- PNG Export Modal -->
+<div class="modal-overlay" id="modal-export-png">
+  <div class="modal" style="max-width:340px;">
+    <div class="modal-header">
+      <span>PNG書き出し</span>
+      <button class="modal-close" data-close="modal-export-png">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>1マスのサイズ(px)</label>
+        <input type="text" inputmode="numeric" id="export-cell-px" placeholder="例: 32">
+        <div class="hint">画面上のズーム倍率とは別に、書き出し画像上での1マスの大きさをpx単位で指定します。グリッド線も現在の設計図と同じ間隔(5マス・10マスごと)で描画されます。</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close="modal-export-png">キャンセル</button>
+      <button class="btn primary" id="btn-confirm-export-png">書き出す</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm Modal (custom, since window.confirm() does not reliably work inside an embedded artifact frame) -->
 <div class="modal-overlay" id="modal-confirm">
   <div class="modal" style="max-width:340px;">
@@ -771,7 +931,10 @@
   var ZOOM_LEVELS = [14, 18, 22, 28, 34, 42, 52];
   var STORAGE_COMPONENTS = "rc_components_v1";
   var STORAGE_DESIGNS = "rc_designs_v1";
+  var STORAGE_GROUP_ORDER = "rc_group_order_v1";
+  var STORAGE_EXPORT_PX = "rc_export_cellpx_v1";
   var DEFAULT_GROUPS = ["レッドストーン系", "建材系"];
+  var INVENTORY_SLOTS = 9;
 
   // ---------------- State ----------------
   var state = {
@@ -779,17 +942,28 @@
     rows: 24,
     zoomIndex: 3,
     grid: {},               // "x,y" -> {compId, v}
-    components: [],         // {id, name, group, variants:[{label, icon}]}
+    components: [],         // {id, name, group, variants:[{label, icon}], order}
+    groupOrder: [],         // explicit display order of group names
     activeTool: null,       // {compId, v} or "eraser"
     designId: null,
     designName: "新しい設計図",
-    variantRows: []         // transient state for the add-component modal
+    variantRows: [],        // transient state for the add/edit-component modal
+    editingComponentId: null, // set while the add-component modal is in "edit existing" mode
+    isAdmin: false,          // determined after sign-in via meta/admins; local-only mode treats the user as editor
+    inventory: new Array(INVENTORY_SLOTS).fill(null), // {compId, v} | null — session-only, never persisted
+    inventoryUserModified: false, // once the user touches their inventory, stop overwriting it from the admin default
+    exportCellPx: 32
   };
 
   // ---------------- Utilities ----------------
   function uid(prefix){ return (prefix||"id") + "_" + Math.random().toString(36).slice(2,9); }
   function key(x,y){ return x + "," + y; }
   function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  // 共有ライブラリ(コンポーネント/グループ順/インベントリ初期値)を編集できるかどうか。
+  // Firebase未接続時はローカルのみの1人用ツールなので誰でも編集可、接続時は管理者のみ。
+  // 実際の書き込み可否はFirestoreのセキュリティルール側でも別途守ること。
+  function canEdit(){ return !cloudDb || state.isAdmin; }
 
   function toast(msg){
     var t = document.getElementById("toast");
@@ -945,6 +1119,37 @@
     try { localStorage.setItem(STORAGE_DESIGNS, JSON.stringify(list)); }
     catch(e){ toast("保存領域が不足しています"); }
   }
+  function loadGroupOrderLocal(){
+    try {
+      var raw = localStorage.getItem(STORAGE_GROUP_ORDER);
+      if (raw) return JSON.parse(raw);
+    } catch(e){}
+    return [];
+  }
+  function saveGroupOrderLocal(list){
+    try { localStorage.setItem(STORAGE_GROUP_ORDER, JSON.stringify(list)); } catch(e){}
+  }
+  function loadExportPx(){
+    try {
+      var raw = localStorage.getItem(STORAGE_EXPORT_PX);
+      if (raw) return parseInt(raw, 10) || 32;
+    } catch(e){}
+    return 32;
+  }
+  function saveExportPx(px){
+    try { localStorage.setItem(STORAGE_EXPORT_PX, String(px)); } catch(e){}
+  }
+  var STORAGE_INVENTORY_DEFAULT = "rc_inventory_default_v1";
+  function loadInventoryDefaultLocal(){
+    try {
+      var raw = localStorage.getItem(STORAGE_INVENTORY_DEFAULT);
+      if (raw) return JSON.parse(raw);
+    } catch(e){}
+    return null;
+  }
+  function saveInventoryDefaultLocal(slots){
+    try { localStorage.setItem(STORAGE_INVENTORY_DEFAULT, JSON.stringify(slots)); } catch(e){}
+  }
 
   // ---------------- Cloud sync (Firebase Auth + Firestore) ----------------
   // Requires firebaseConfig (near the bottom of <head>) to be filled in with
@@ -973,19 +1178,16 @@
   function setCloudStatus(mode){
     var el = document.getElementById("cloud-status");
     if (mode === "shared"){
-      el.textContent = "🌐 共有ライブラリ";
-      el.title = "コンポーネントは許可されたメンバー全員と共有・同期されています";
+      el.textContent = "共有ライブラリ";
+      el.title = "コンポーネントは全員に公開され、リアルタイムで同期されています";
     } else if (mode === "connecting"){
-      el.textContent = "🌐 接続中…";
+      el.textContent = "接続中…";
       el.title = "共有ライブラリに接続しています";
     } else if (mode === "readonly"){
-      el.textContent = "🌐 共有ライブラリ(閲覧のみ)";
-      el.title = "このアカウントには書き込み権限がありません(Firestoreのセキュリティルールを確認してください)";
-    } else if (mode === "signedout"){
-      el.textContent = "🔒 未サインイン";
-      el.title = "Googleでサインインすると共有ライブラリが使えます";
+      el.textContent = "共有ライブラリ(閲覧のみ)";
+      el.title = "このアカウントには書き込み権限がありません";
     } else {
-      el.textContent = "💾 ローカルのみ";
+      el.textContent = "ローカルのみ";
       el.title = "Firebaseが未設定のため、このブラウザにのみ保存されます";
     }
     dbgLog("status: " + mode);
@@ -1001,16 +1203,21 @@
     return JSON.stringify(body).length < 700000;
   }
 
+  // ツール自体はサインイン不要で誰でも開ける。Firebase接続時は共有ライブラリ・
+  // グループ順・インベントリ初期値を「公開読み取り」で即座に購読を開始し、
+  // サインイン(Googleログイン)は「管理者かどうかを確認するための追加操作」という位置づけにする。
   function initCloudSync(){
     dbgLog("initCloudSync 開始");
     if (typeof firebaseConfig === "undefined" || !firebaseConfig || firebaseConfig.apiKey === "YOUR_API_KEY"){
       dbgLog("firebaseConfig 未設定");
       setCloudStatus("local");
+      updateAdminUI();
       return; // firebaseConfig not filled in yet — stays on localStorage-only mode
     }
     if (typeof firebase === "undefined"){
       dbgLog("Firebase SDK 読み込み失敗(スクリプトタグを確認)");
       setCloudStatus("local");
+      updateAdminUI();
       return;
     }
     try {
@@ -1018,10 +1225,12 @@
       fbAuth = firebase.auth();
       cloudDb = firebase.firestore();
       dbgLog("firebase初期化 OK (projectId=" + firebaseConfig.projectId + ")");
-    } catch(e){ dbgLog("firebase初期化 失敗: " + e.message); setCloudStatus("local"); return; }
+    } catch(e){ dbgLog("firebase初期化 失敗: " + e.message); setCloudStatus("local"); updateAdminUI(); return; }
 
-    setCloudStatus("signedout");
-    document.getElementById("signin-gate").classList.add("visible");
+    setCloudStatus("connecting");
+    startComponentsSync();
+    subscribeGroupOrder();
+    subscribeInventoryDefault();
 
     dbgLog("getRedirectResult 確認中… (現在のURL: " + location.href + ")");
     fbAuth.getRedirectResult().then(function(result){
@@ -1039,17 +1248,45 @@
       dbgLog("onAuthStateChanged: " + (user ? user.email : "(signed out)"));
       cloudUser = user;
       if (!user){
-        document.getElementById("signin-gate").classList.add("visible");
+        state.isAdmin = false;
         document.getElementById("signin-email").textContent = "";
         document.getElementById("signout-btn").style.display = "none";
-        setCloudStatus("signedout");
+        updateAdminUI();
         return;
       }
-      document.getElementById("signin-gate").classList.remove("visible");
       document.getElementById("signin-email").textContent = user.email || "";
       document.getElementById("signout-btn").style.display = "inline-flex";
-      startComponentsSync();
+      closeModal("modal-admin-login");
+      fetchAdminStatus(user);
     });
+  }
+
+  // meta/admins ドキュメント(uids配列)を1回読み、現在のユーザーが管理者かどうかを判定する。
+  // あくまでUIの出し分け用。実際の書き込み可否は必ずFirestoreルール側で判定させること。
+  function fetchAdminStatus(user){
+    if (!cloudDb || !user){ state.isAdmin = false; updateAdminUI(); return; }
+    cloudDb.collection("meta").doc("admins").get().then(function(doc){
+      var uids = (doc.exists && doc.data() && doc.data().uids) || [];
+      state.isAdmin = uids.indexOf(user.uid) !== -1;
+      dbgLog("管理者判定: " + (state.isAdmin ? "管理者です" : "管理者ではありません"));
+      if (!state.isAdmin) toast("サインインしました(管理者権限はありません。閲覧・利用は可能です)");
+      updateAdminUI();
+    }).catch(function(err){
+      dbgLog("管理者判定に失敗: " + err.code + " / " + err.message);
+      state.isAdmin = false;
+      updateAdminUI();
+    });
+  }
+
+  // 管理者フラグの変化に応じて、編集系UIの表示/非表示をまとめて更新する。
+  function updateAdminUI(){
+    var admin = canEdit();
+    document.getElementById("admin-badge").style.display = (cloudDb && state.isAdmin) ? "inline-flex" : "none";
+    document.getElementById("add-component-btn").style.display = admin ? "inline-flex" : "none";
+    document.getElementById("palette-readonly-hint").style.display = admin ? "none" : "block";
+    document.getElementById("btn-save-inventory-default").style.display = admin ? "inline-flex" : "none";
+    document.getElementById("signin-open-btn").style.display = (cloudDb && !cloudUser) ? "inline-flex" : "none";
+    renderPalette();
   }
 
 function doGoogleSignIn(){
@@ -1068,11 +1305,10 @@ function doGoogleSignIn(){
       dbgLog("Google popup sign-in success: " + (result.user && result.user.email));
       if (result && result.user) {
         cloudUser = result.user;
-        document.getElementById("signin-gate").classList.remove("visible");
         document.getElementById("signin-email").textContent = result.user.email || "";
         document.getElementById("signout-btn").style.display = "inline-flex";
-        setCloudStatus("connecting");
-        startComponentsSync();
+        closeModal("modal-admin-login");
+        fetchAdminStatus(result.user);
       }
     })
     .catch(function(error) {
@@ -1093,6 +1329,8 @@ function doGoogleSignIn(){
 }
   function doSignOut(){
     if (fbAuth) fbAuth.signOut();
+    state.isAdmin = false;
+    updateAdminUI();
   }
 
   var componentsSyncStarted = false;
@@ -1101,47 +1339,47 @@ function doGoogleSignIn(){
     componentsSyncStarted = true;
     var compsCol = cloudDb.collection("components");
 
-    // One-time seed: if the shared library is empty, populate it from whatever
-    // this browser already has (defaults, plus anything added locally so far).
-    compsCol.get().then(function(existing){
-      if (existing.empty && state.components.length > 0){
-        var batch = cloudDb.batch();
-        state.components.forEach(function(c){
-          var body = { name: c.name, group: c.group, variants: c.variants, updatedAt: Date.now(), addedBy: cloudUser.email || null };
-          if (docSizeOk(body)) batch.set(compsCol.doc(c.id), body);
-        });
-        batch.commit().catch(function(e){ console.warn("seed failed", e); });
-      }
-    }).catch(function(e){ console.warn("seed check failed", e); });
-
-    // Live subscription: every signed-in member's palette stays in sync from here on.
+    // Live subscription — 公開読み取りなので、サインインの有無に関わらず全員に配信される。
     compsCol.onSnapshot(function(snap){
       var list = [];
       snap.forEach(function(d){
         var data = d.data() || {};
-        list.push({ id: d.id, name: data.name || "?", group: data.group || "建材系", variants: data.variants || [] });
+        list.push({ id: d.id, name: data.name || "?", group: data.group || "建材系", variants: data.variants || [], order: (typeof data.order === "number") ? data.order : 0 });
       });
       state.components = list;
       cloudReady = true;
       renderPalette();
       renderToolPanel();
+      applyInventoryDefaultIfNeeded();
       setCloudStatus("shared");
     }, function(err){
       console.warn("components subscription error", err);
       if (err.code === "permission-denied"){
         setCloudStatus("readonly");
-        toast("このGoogleアカウントは許可リストに含まれていません");
       } else {
         toast("共有ライブラリの同期でエラーが発生しました");
       }
     });
   }
 
-  // Writes a component to the shared library when connected, otherwise falls
-  // back to plain localStorage — used by both the add-component and delete flows.
+  // グループ(ジャンル)の並び順。meta/groupOrder ドキュメントの groups 配列を公開読み取りで購読する。
+  function subscribeGroupOrder(){
+    cloudDb.collection("meta").doc("groupOrder").onSnapshot(function(doc){
+      state.groupOrder = (doc.exists && doc.data() && doc.data().groups) || [];
+      renderPalette();
+    }, function(err){ console.warn("groupOrder subscription error", err); });
+  }
+  function cloudSaveGroupOrder(groups){
+    if (!cloudDb) { state.groupOrder = groups; saveGroupOrderLocal(groups); renderPalette(); return; }
+    if (!canEdit()) { toast("権限がないため並べ替えを保存できません"); return; }
+    cloudDb.collection("meta").doc("groupOrder").set({ groups: groups, updatedAt: Date.now() })
+      .catch(function(err){ toast("グループ順の保存に失敗しました"); console.warn(err); });
+  }
+
+  // コンポーネントの管理者向け書き込み(追加・編集・削除・並べ替え)。
   function cloudAddComponent(comp, onDone){
-    if (!cloudDb || !cloudUser){ onDone(true); return; }
-    var body = { name: comp.name, group: comp.group, variants: comp.variants, updatedAt: Date.now(), addedBy: cloudUser.email || null };
+    if (!cloudDb){ onDone(true); return; }
+    var body = { name: comp.name, group: comp.group, variants: comp.variants, order: comp.order || Date.now(), updatedAt: Date.now(), addedBy: (cloudUser && cloudUser.email) || null };
     if (!docSizeOk(body)){
       toast("アイコン画像の合計サイズが大きすぎます");
       onDone(false);
@@ -1154,14 +1392,63 @@ function doGoogleSignIn(){
         onDone(false);
       });
   }
+  function cloudUpdateComponent(id, patch, onDone){
+    if (!cloudDb){ onDone(true); return; }
+    var body = Object.assign({}, patch, { updatedAt: Date.now() });
+    if (!docSizeOk(body)){
+      toast("アイコン画像の合計サイズが大きすぎます");
+      onDone(false);
+      return;
+    }
+    cloudDb.collection("components").doc(id).set(body, { merge: true })
+      .then(function(){ onDone(true); })
+      .catch(function(err){
+        toast(err && err.code === "permission-denied" ? "権限がないため更新できませんでした" : "更新に失敗しました");
+        onDone(false);
+      });
+  }
   function cloudDeleteComponent(id, onDone){
-    if (!cloudDb || !cloudUser){ onDone(true); return; }
+    if (!cloudDb){ onDone(true); return; }
     cloudDb.collection("components").doc(id).delete()
       .then(function(){ onDone(true); })
       .catch(function(err){
         toast(err && err.code === "permission-denied" ? "権限がないため削除できませんでした" : "削除に失敗しました");
         onDone(false);
       });
+  }
+  // 同じグループ内の並べ替え結果を、order フィールドとして一括保存する。
+  function cloudSaveComponentOrder(orderedIds){
+    if (!cloudDb) { saveComponents(state.components); return; }
+    if (!canEdit()) { toast("権限がないため並べ替えを保存できません"); return; }
+    var batch = cloudDb.batch();
+    orderedIds.forEach(function(id, idx){
+      batch.update(cloudDb.collection("components").doc(id), { order: idx });
+    });
+    batch.commit().catch(function(err){ toast("並べ替えの保存に失敗しました"); console.warn(err); });
+  }
+
+  // インベントリの初期値(管理者が設定)。公開読み取りで購読し、ユーザーが
+  // まだ自分でインベントリを編集していなければ自動的に反映する。
+  function subscribeInventoryDefault(){
+    cloudDb.collection("meta").doc("inventoryDefault").onSnapshot(function(doc){
+      var slots = (doc.exists && doc.data() && doc.data().slots) || null;
+      if (slots) state.inventoryDefaultCache = slots;
+      applyInventoryDefaultIfNeeded();
+    }, function(err){ console.warn("inventoryDefault subscription error", err); });
+  }
+  function applyInventoryDefaultIfNeeded(){
+    if (state.inventoryUserModified) return;
+    if (!state.inventoryDefaultCache) return;
+    state.inventory = state.inventoryDefaultCache.map(function(s){ return s ? { compId: s.compId, v: s.v || 0 } : null; });
+    while (state.inventory.length < INVENTORY_SLOTS) state.inventory.push(null);
+    renderInventory();
+  }
+  function cloudSaveInventoryDefault(slots){
+    if (!cloudDb) { saveInventoryDefaultLocal(slots); toast("インベントリの初期状態を保存しました"); return; }
+    if (!canEdit()) { toast("権限がないため保存できません"); return; }
+    cloudDb.collection("meta").doc("inventoryDefault").set({ slots: slots, updatedAt: Date.now() })
+      .then(function(){ toast("インベントリの初期状態を保存しました"); })
+      .catch(function(err){ toast("保存に失敗しました"); console.warn(err); });
   }
 
   // ---------------- Group helpers ----------------
@@ -1171,11 +1458,69 @@ function doGoogleSignIn(){
     state.components.forEach(function(c){ set[c.group]=true; });
     return Object.keys(set);
   }
+  // 表示順つきのグループ一覧: state.groupOrder に載っているものを先に、
+  // 未登録の(新しく追加された)グループはあとに追加する。
+  function orderedGroups(){
+    var present = {};
+    state.components.forEach(function(c){ present[c.group] = true; });
+    var ordered = state.groupOrder.filter(function(g){ return present[g]; });
+    var seen = {};
+    ordered.forEach(function(g){ seen[g] = true; });
+    Object.keys(present).forEach(function(g){ if (!seen[g]) ordered.push(g); });
+    return ordered;
+  }
 
   // ---------------- Rendering: palette ----------------
+  var dragPayload = null; // フォールバック用(一部ブラウザでdataTransfer.getDataがdragover中に読めないため)
+
+  function persistComponentDelete(comp){
+    if (cloudDb){
+      cloudDeleteComponent(comp.id, function(){ /* UI updates via onSnapshot */ });
+    } else {
+      state.components = state.components.filter(function(c){ return c.id !== comp.id; });
+      saveComponents(state.components);
+      renderPalette();
+      renderToolPanel();
+    }
+  }
+
+  function reorderWithinGroup(groupName, draggedId, targetId, before){
+    var groupItems = state.components.filter(function(c){ return c.group === groupName; })
+      .sort(function(a,b){ return (a.order||0) - (b.order||0); });
+    var others = state.components.filter(function(c){ return c.group !== groupName; });
+    var fromIdx = groupItems.findIndex(function(c){ return c.id === draggedId; });
+    if (fromIdx === -1) return;
+    var moved = groupItems.splice(fromIdx, 1)[0];
+    var toIdx = groupItems.findIndex(function(c){ return c.id === targetId; });
+    if (toIdx === -1) toIdx = groupItems.length;
+    groupItems.splice(before ? toIdx : toIdx + 1, 0, moved);
+    groupItems.forEach(function(c, idx){ c.order = idx; });
+    state.components = others.concat(groupItems);
+    if (cloudDb){
+      cloudSaveComponentOrder(groupItems.map(function(c){ return c.id; }));
+    } else {
+      saveComponents(state.components);
+    }
+    renderPalette();
+  }
+
+  function reorderGroups(draggedGroup, targetGroup, before){
+    var list = orderedGroups();
+    var fromIdx = list.indexOf(draggedGroup);
+    if (fromIdx === -1) return;
+    list.splice(fromIdx, 1);
+    var toIdx = list.indexOf(targetGroup);
+    if (toIdx === -1) toIdx = list.length;
+    list.splice(before ? toIdx : toIdx + 1, 0, draggedGroup);
+    state.groupOrder = list;
+    cloudSaveGroupOrder(list);
+    renderPalette();
+  }
+
   function renderPalette(){
     var root = document.getElementById("palette");
     root.innerHTML = "";
+    var admin = canEdit();
 
     // eraser
     var eraserWrap = document.createElement("div");
@@ -1194,42 +1539,77 @@ function doGoogleSignIn(){
     if (state.components.length === 0){
       var hint = document.createElement("div");
       hint.id = "empty-palette-hint";
-      hint.textContent = "まだコンポーネントがありません。「＋ 新しいコンポーネント」から追加してください。";
+      hint.textContent = admin ? "まだコンポーネントがありません。「＋ 新しいコンポーネント」から追加してください。" : "まだコンポーネントがありません。";
       root.appendChild(hint);
       return;
     }
 
     var groups = {};
-    var order = [];
     state.components.forEach(function(c){
-      if (!groups[c.group]) { groups[c.group] = []; order.push(c.group); }
+      if (!groups[c.group]) groups[c.group] = [];
       groups[c.group].push(c);
     });
+    Object.keys(groups).forEach(function(g){ groups[g].sort(function(a,b){ return (a.order||0) - (b.order||0); }); });
 
-    order.forEach(function(groupName){
+    orderedGroups().forEach(function(groupName){
+      if (!groups[groupName]) return;
       var header = document.createElement("div");
       header.className = "group-header";
-      header.innerHTML = '<span class="chev">▾</span><span>' + esc(groupName) + '</span>';
+      header.innerHTML =
+        (admin ? '<span class="group-drag-handle" draggable="true" title="ドラッグでジャンルを並べ替え">⠿</span>' : '') +
+        '<span class="chev">▾</span><span>' + esc(groupName) + '</span>';
       var itemsWrap = document.createElement("div");
       itemsWrap.className = "group-items";
 
-      header.addEventListener("click", function(){
+      header.addEventListener("click", function(e){
+        if (e.target.classList.contains("group-drag-handle")) return;
         header.classList.toggle("collapsed");
         itemsWrap.classList.toggle("collapsed");
       });
+
+      if (admin){
+        var handle = header.querySelector(".group-drag-handle");
+        handle.addEventListener("dragstart", function(e){
+          dragPayload = { type: "group", group: groupName };
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", "group:" + groupName);
+        });
+        header.addEventListener("dragover", function(e){
+          if (!dragPayload || dragPayload.type !== "group" || dragPayload.group === groupName) return;
+          e.preventDefault();
+          var rect = header.getBoundingClientRect();
+          var before = (e.clientY - rect.top) < rect.height / 2;
+          header.classList.toggle("drag-over-top", before);
+          header.classList.toggle("drag-over-bottom", !before);
+        });
+        header.addEventListener("dragleave", function(){
+          header.classList.remove("drag-over-top", "drag-over-bottom");
+        });
+        header.addEventListener("drop", function(e){
+          header.classList.remove("drag-over-top", "drag-over-bottom");
+          if (!dragPayload || dragPayload.type !== "group" || dragPayload.group === groupName) return;
+          e.preventDefault();
+          var rect = header.getBoundingClientRect();
+          var before = (e.clientY - rect.top) < rect.height / 2;
+          reorderGroups(dragPayload.group, groupName, before);
+          dragPayload = null;
+        });
+      }
 
       groups[groupName].forEach(function(comp){
         var item = document.createElement("div");
         var isActive = state.activeTool && state.activeTool !== "eraser" && state.activeTool.compId === comp.id;
         item.className = "comp-item" + (isActive ? " active" : "");
+        item.draggable = true; // 誰でもインベントリへドラッグできるようにする
         var iconUrl = (comp.variants[0] && comp.variants[0].icon) || placeholderIcon(comp.name);
         item.innerHTML =
+          (admin ? '<span class="comp-drag-handle" title="ドラッグで並べ替え">⠿</span>' : '') +
           '<div class="comp-icon" style="background-image:url(\'' + iconUrl + '\')"></div>' +
           '<div class="comp-name">' + esc(comp.name) + '</div>' +
-          '<button class="comp-del" title="削除">✕</button>';
+          (admin ? '<button class="comp-edit" title="編集">編集</button><button class="comp-del" title="削除">✕</button>' : '');
 
         item.addEventListener("click", function(e){
-          if (e.target.classList.contains("comp-del")) return;
+          if (e.target.classList.contains("comp-del") || e.target.classList.contains("comp-edit")) return;
           var prevVariant = 0;
           if (state.activeTool && state.activeTool !== "eraser" && state.activeTool.compId === comp.id){
             prevVariant = state.activeTool.v;
@@ -1238,20 +1618,45 @@ function doGoogleSignIn(){
           renderPalette();
           renderToolPanel();
         });
-        item.querySelector(".comp-del").addEventListener("click", function(e){
-          e.stopPropagation();
-          showConfirm('"' + comp.name + '" を削除しますか?配置済みのブロックは空欄になります。', function(){
-            if (state.activeTool && state.activeTool !== "eraser" && state.activeTool.compId === comp.id) state.activeTool = null;
-            if (cloudDb){
-              cloudDeleteComponent(comp.id, function(ok){ /* UI updates via onSnapshot */ });
-            } else {
-              state.components = state.components.filter(function(c){ return c.id !== comp.id; });
-              saveComponents(state.components);
-              renderPalette();
-              renderToolPanel();
-            }
-          });
+
+        item.addEventListener("dragstart", function(e){
+          dragPayload = { type: "comp", compId: comp.id, group: groupName };
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", "comp:" + comp.id);
         });
+        if (admin){
+          item.addEventListener("dragover", function(e){
+            if (!dragPayload || dragPayload.type !== "comp" || dragPayload.group !== groupName || dragPayload.compId === comp.id) return;
+            e.preventDefault();
+            var rect = item.getBoundingClientRect();
+            var before = (e.clientY - rect.top) < rect.height / 2;
+            item.classList.toggle("drag-over-top", before);
+            item.classList.toggle("drag-over-bottom", !before);
+          });
+          item.addEventListener("dragleave", function(){
+            item.classList.remove("drag-over-top", "drag-over-bottom");
+          });
+          item.addEventListener("drop", function(e){
+            item.classList.remove("drag-over-top", "drag-over-bottom");
+            if (!dragPayload || dragPayload.type !== "comp" || dragPayload.group !== groupName || dragPayload.compId === comp.id) return;
+            e.preventDefault();
+            var rect = item.getBoundingClientRect();
+            var before = (e.clientY - rect.top) < rect.height / 2;
+            reorderWithinGroup(groupName, dragPayload.compId, comp.id, before);
+            dragPayload = null;
+          });
+          item.querySelector(".comp-edit").addEventListener("click", function(e){
+            e.stopPropagation();
+            openComponentModal(comp);
+          });
+          item.querySelector(".comp-del").addEventListener("click", function(e){
+            e.stopPropagation();
+            showConfirm('"' + comp.name + '" を削除しますか?配置済みのブロックは空欄になります。', function(){
+              if (state.activeTool && state.activeTool !== "eraser" && state.activeTool.compId === comp.id) state.activeTool = null;
+              persistComponentDelete(comp);
+            });
+          });
+        }
         itemsWrap.appendChild(item);
       });
 
@@ -1264,6 +1669,86 @@ function doGoogleSignIn(){
     for (var i=0;i<state.components.length;i++){ if (state.components[i].id === id) return state.components[i]; }
     return null;
   }
+
+  // ---------------- Inventory (hotbar) ----------------
+  // パレットとは別枠の少数スロット。管理者が初期状態を設定できるが、各ユーザーの
+  // 割り当て変更はページを開いている間だけの一時的な記憶で、保存・同期はしない。
+  function inventoryIconUrl(slot){
+    if (!slot) return "";
+    var comp = findComponent(slot.compId);
+    if (!comp) return placeholderIcon("?");
+    var variant = comp.variants[slot.v] || comp.variants[0];
+    return variant ? variant.icon : placeholderIcon(comp.name);
+  }
+
+  function renderInventory(){
+    var root = document.getElementById("inventory-slots");
+    root.innerHTML = "";
+    state.inventory.forEach(function(slot, idx){
+      var el = document.createElement("div");
+      var isSelected = state.activeTool && state.activeTool !== "eraser" &&
+        state.inventorySelectedIndex === idx && slot && state.activeTool.compId === slot.compId;
+      el.className = "inv-slot" + (slot ? " filled" : "") + (isSelected ? " selected" : "");
+      el.title = slot ? ((findComponent(slot.compId) || {}).name || "?") : "空きスロット(パレットからドラッグ)";
+      if (slot) el.style.backgroundImage = "url('" + inventoryIconUrl(slot) + "')";
+      if (slot) el.innerHTML = '<button class="inv-clear" title="クリア">✕</button>';
+
+      el.addEventListener("click", function(e){
+        if (e.target.classList.contains("inv-clear")) return;
+        if (!slot) return;
+        state.activeTool = { compId: slot.compId, v: slot.v };
+        state.inventorySelectedIndex = idx;
+        renderInventory();
+        renderPalette();
+        renderToolPanel();
+      });
+      if (slot){
+        el.querySelector(".inv-clear").addEventListener("click", function(e){
+          e.stopPropagation();
+          state.inventory[idx] = null;
+          state.inventoryUserModified = true;
+          renderInventory();
+        });
+      }
+
+      el.draggable = !!slot; // 割り当て済みスロットは並べ替えのために自身もドラッグ元になる
+      el.addEventListener("dragstart", function(e){
+        if (!slot) { e.preventDefault(); return; }
+        dragPayload = { type: "inv", index: idx };
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", "inv:" + idx);
+      });
+      el.addEventListener("dragover", function(e){
+        if (!dragPayload) return;
+        if (dragPayload.type !== "comp" && dragPayload.type !== "inv") return;
+        e.preventDefault();
+        el.classList.add("drag-over");
+      });
+      el.addEventListener("dragleave", function(){ el.classList.remove("drag-over"); });
+      el.addEventListener("drop", function(e){
+        el.classList.remove("drag-over");
+        if (!dragPayload) return;
+        e.preventDefault();
+        if (dragPayload.type === "comp"){
+          state.inventory[idx] = { compId: dragPayload.compId, v: 0 };
+        } else if (dragPayload.type === "inv" && dragPayload.index !== idx){
+          var tmp = state.inventory[idx];
+          state.inventory[idx] = state.inventory[dragPayload.index];
+          state.inventory[dragPayload.index] = tmp;
+        }
+        state.inventoryUserModified = true;
+        dragPayload = null;
+        renderInventory();
+      });
+
+      root.appendChild(el);
+    });
+  }
+
+  document.getElementById("btn-save-inventory-default").addEventListener("click", function(){
+    var slots = state.inventory.map(function(s){ return s ? { compId: s.compId, v: s.v } : null; });
+    cloudSaveInventoryDefault(slots);
+  });
 
   function renderToolPanel(){
     var panel = document.getElementById("tool-panel");
@@ -1410,6 +1895,116 @@ function doGoogleSignIn(){
   document.getElementById("zoom-out").addEventListener("click", function(){
     state.zoomIndex = Math.max(0, state.zoomIndex - 1);
     buildGrid(); refreshZoomUI();
+  });
+
+  // マウスホイールでの拡大縮小(トラックパッドの2本指スクロールにも反応する)。
+  document.getElementById("canvas-wrap").addEventListener("wheel", function(e){
+    e.preventDefault();
+    if (e.deltaY < 0) state.zoomIndex = Math.min(ZOOM_LEVELS.length - 1, state.zoomIndex + 1);
+    else if (e.deltaY > 0) state.zoomIndex = Math.max(0, state.zoomIndex - 1);
+    else return;
+    buildGrid(); refreshZoomUI();
+  }, { passive: false });
+
+  // ---------------- PNG export ----------------
+  function loadImagePromise(src){
+    return new Promise(function(resolve, reject){
+      var img = new Image();
+      img.onload = function(){ resolve(img); };
+      img.onerror = function(){ reject(new Error("image load failed: " + src)); };
+      img.src = src;
+    });
+  }
+
+  function exportPngEdgeStyle(n1based){
+    if (n1based % 10 === 0) return { w: 2, c: "#a8a29a" };
+    if (n1based % 5 === 0) return { w: 1.2, c: "#cbc6bd" };
+    return { w: 0.6, c: "#e9e7e3" };
+  }
+
+  function drawGridLinesOnCanvas(ctx, cellPx){
+    for (var x = 0; x <= state.cols; x++){
+      var style = exportPngEdgeStyle(x === 0 ? state.cols : x);
+      ctx.strokeStyle = style.c;
+      ctx.lineWidth = style.w;
+      ctx.beginPath();
+      ctx.moveTo(x * cellPx, 0);
+      ctx.lineTo(x * cellPx, state.rows * cellPx);
+      ctx.stroke();
+    }
+    for (var y = 0; y <= state.rows; y++){
+      var styleY = exportPngEdgeStyle(y === 0 ? state.rows : y);
+      ctx.strokeStyle = styleY.c;
+      ctx.lineWidth = styleY.w;
+      ctx.beginPath();
+      ctx.moveTo(0, y * cellPx);
+      ctx.lineTo(state.cols * cellPx, y * cellPx);
+      ctx.stroke();
+    }
+  }
+
+  function exportPng(){
+    var cellPx = state.exportCellPx;
+    var canvas = document.createElement("canvas");
+    canvas.width = state.cols * cellPx;
+    canvas.height = state.rows * cellPx;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fcfbfa";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var neededIcons = {};
+    Object.keys(state.grid).forEach(function(k){
+      var d = state.grid[k];
+      var comp = findComponent(d.compId);
+      if (!comp) return;
+      var v = comp.variants[d.v] || comp.variants[0];
+      if (v) neededIcons[v.icon] = true;
+    });
+    var urls = Object.keys(neededIcons);
+
+    Promise.all(urls.map(loadImagePromise)).then(function(imgs){
+      var map = {};
+      urls.forEach(function(u, i){ map[u] = imgs[i]; });
+      Object.keys(state.grid).forEach(function(k){
+        var d = state.grid[k];
+        var comp = findComponent(d.compId);
+        if (!comp) return;
+        var v = comp.variants[d.v] || comp.variants[0];
+        var img = v && map[v.icon];
+        if (!img) return;
+        var parts = k.split(",");
+        var x = parseInt(parts[0], 10), y = parseInt(parts[1], 10);
+        ctx.drawImage(img, x * cellPx, y * cellPx, cellPx, cellPx);
+      });
+      drawGridLinesOnCanvas(ctx, cellPx);
+      canvas.toBlob(function(blob){
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = (state.designName || "design").replace(/[^\w\-ぁ-んァ-ヶ一-龠]/g, "_") + ".png";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+        toast("PNG画像を書き出しました");
+      });
+    }).catch(function(err){
+      console.warn("PNG export failed", err);
+      toast("画像の読み込みに失敗したため、書き出しできませんでした");
+    });
+  }
+
+  document.getElementById("btn-export-png").addEventListener("click", function(){
+    document.getElementById("export-cell-px").value = state.exportCellPx;
+    openModal("modal-export-png");
+  });
+  document.getElementById("btn-confirm-export-png").addEventListener("click", function(){
+    var px = parseInt(document.getElementById("export-cell-px").value, 10);
+    if (!px || px < 4 || px > 256){ toast("4〜256の範囲で指定してください"); return; }
+    state.exportCellPx = px;
+    saveExportPx(px);
+    closeModal("modal-export-png");
+    exportPng();
   });
 
   // ---------------- Resize ----------------
@@ -1683,15 +2278,26 @@ function doGoogleSignIn(){
     });
   }
 
-  document.getElementById("add-component-btn").addEventListener("click", function(){
-    document.getElementById("comp-name").value = "";
+  // comp を渡すと既存コンポーネントの編集モードでモーダルを開く。省略すると新規追加。
+  function openComponentModal(comp){
+    state.editingComponentId = comp ? comp.id : null;
+    document.getElementById("modal-component-title").textContent = comp ? "コンポーネントを編集" : "新しいコンポーネント";
+    document.getElementById("btn-save-component").textContent = comp ? "更新する" : "追加する";
+    document.getElementById("comp-name").value = comp ? comp.name : "";
     populateGroupSelect();
+    if (comp) document.getElementById("comp-group").value = comp.group;
     document.getElementById("comp-group-new").style.display = "none";
     document.getElementById("comp-group-new").value = "";
-    state.variantRows = [ makeVariantRow("標準") ];
+    state.variantRows = comp
+      ? comp.variants.map(function(v){ return { label: v.label, dataUrl: v.icon }; })
+      : [ makeVariantRow("標準") ];
     renderVariantList();
     openModal("modal-component");
     document.getElementById("comp-name").focus();
+  }
+
+  document.getElementById("add-component-btn").addEventListener("click", function(){
+    openComponentModal(null);
   });
 
   document.getElementById("btn-add-variant").addEventListener("click", function(){
@@ -1711,7 +2317,28 @@ function doGoogleSignIn(){
     var variants = state.variantRows.map(function(row){
       return { label: row.label || "標準", icon: row.dataUrl || placeholderIcon(name + " " + row.label) };
     });
-    var comp = { id: uid("c"), name: name, group: group, variants: variants };
+
+    if (state.editingComponentId){
+      // 既存コンポーネントの更新(画像差し替え・バリエーション増減・グループ変更に対応)
+      var id = state.editingComponentId;
+      var existing = findComponent(id);
+      var patch = { name: name, group: group, variants: variants, order: existing ? existing.order : 0 };
+      if (cloudDb){
+        cloudUpdateComponent(id, patch, function(ok){
+          if (ok) toast('"' + name + '" を更新しました'); // UI list updates via onSnapshot
+        });
+      } else {
+        var idx = state.components.findIndex(function(c){ return c.id === id; });
+        if (idx !== -1) state.components[idx] = Object.assign({}, state.components[idx], patch);
+        saveComponents(state.components);
+        renderPalette();
+        toast('"' + name + '" を更新しました');
+      }
+      closeModal("modal-component");
+      return;
+    }
+
+    var comp = { id: uid("c"), name: name, group: group, variants: variants, order: Date.now() };
     if (cloudDb){
       cloudAddComponent(comp, function(ok){
         if (ok) toast('"' + name + '" を共有ライブラリに追加しました'); // UI list updates via onSnapshot
@@ -1729,14 +2356,24 @@ function doGoogleSignIn(){
   // ---------------- Init ----------------
   document.getElementById("signin-btn").addEventListener("click", doGoogleSignIn);
   document.getElementById("signout-btn").addEventListener("click", doSignOut);
+  document.getElementById("signin-open-btn").addEventListener("click", function(){ openModal("modal-admin-login"); });
 
   function init(){
     state.components = loadComponents();
+    state.groupOrder = loadGroupOrderLocal();
+    state.exportCellPx = loadExportPx();
+    var localInvDefault = loadInventoryDefaultLocal();
+    if (localInvDefault) {
+      state.inventoryDefaultCache = localInvDefault;
+      applyInventoryDefaultIfNeeded();
+    }
     resetDesignMeta("新しい設計図");
     renderPalette();
     renderToolPanel();
+    renderInventory();
     buildGrid();
     refreshZoomUI();
+    updateAdminUI(); // Firebase未接続でもボタン表示を確定させる(ローカルモードでは誰でも編集可)
     initCloudSync(); // fire-and-forget: renders locally first, then syncs to the shared library if this view has it
   }
   init();
