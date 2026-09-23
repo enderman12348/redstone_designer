@@ -617,8 +617,11 @@
     <p>このツールはGoogleアカウントでサインインしたメンバーだけが使えます。</p>
     <button class="btn primary" id="signin-btn" style="justify-content:center; width:100%;">Googleでサインイン</button>
     <p class="signin-hint">許可されていないアカウントの場合、共有ライブラリは読み込めません(ローカル保存のみの動作になります)。</p>
+    <p class="signin-hint" style="cursor:pointer; text-decoration:underline;" id="debug-toggle-link">動作ログを見る(不具合の確認用)</p>
   </div>
 </div>
+
+<div id="debug-panel" style="display:none; position:fixed; inset:auto 8px 8px 8px; max-height:40vh; overflow-y:auto; background:#111; color:#7fffb0; font-family:monospace; font-size:10.5px; padding:8px; border-radius:8px; z-index:250; white-space:pre-wrap; line-height:1.5;"></div>
 
 <div id="app">
 
@@ -635,7 +638,7 @@
 
     <div id="topbar-spacer"></div>
 
-    <span id="cloud-status" title="このブラウザにのみ保存されます" style="font-size:11.5px; color:var(--text-faint); display:flex; align-items:center; gap:4px; padding:0 6px;">💾 ローカルのみ</span>
+    <span id="cloud-status" title="このブラウザにのみ保存されます" style="font-size:11.5px; color:var(--text-faint); display:flex; align-items:center; gap:4px; padding:0 6px; cursor:pointer;">💾 ローカルのみ</span>
     <span id="signin-email" style="font-size:11.5px; color:var(--text-secondary); padding:0 2px;"></span>
     <button class="btn small" id="signout-btn" style="display:none;">サインアウト</button>
 
@@ -952,6 +955,21 @@
   var cloudReady = false;
   var fbApp = null, fbAuth = null;
 
+  // On-screen debug log — iPad/iPhone Safari has no attachable devtools console
+  // in most setups, so failures need to be visible on the page itself.
+  var dbgLines = [];
+  function dbgLog(msg){
+    var t = new Date().toLocaleTimeString();
+    dbgLines.push("[" + t + "] " + msg);
+    var panel = document.getElementById("debug-panel");
+    if (panel) panel.textContent = dbgLines.join("\n");
+    console.log("[cloud]", msg);
+  }
+  document.getElementById("debug-toggle-link").addEventListener("click", function(){
+    var panel = document.getElementById("debug-panel");
+    panel.style.display = (panel.style.display === "none") ? "block" : "none";
+  });
+
   function setCloudStatus(mode){
     var el = document.getElementById("cloud-status");
     if (mode === "shared"){
@@ -970,7 +988,12 @@
       el.textContent = "💾 ローカルのみ";
       el.title = "Firebaseが未設定のため、このブラウザにのみ保存されます";
     }
+    dbgLog("status: " + mode);
   }
+  document.getElementById("cloud-status").addEventListener("click", function(){
+    var panel = document.getElementById("debug-panel");
+    panel.style.display = (panel.style.display === "none") ? "block" : "none";
+  });
 
   function docSizeOk(body){
     // Soft guard under Firestore's 1 MiB per-document cap (icons are base64 data URLs) —
@@ -979,12 +1002,14 @@
   }
 
   function initCloudSync(){
+    dbgLog("initCloudSync 開始");
     if (typeof firebaseConfig === "undefined" || !firebaseConfig || firebaseConfig.apiKey === "YOUR_API_KEY"){
+      dbgLog("firebaseConfig 未設定");
       setCloudStatus("local");
       return; // firebaseConfig not filled in yet — stays on localStorage-only mode
     }
     if (typeof firebase === "undefined"){
-      console.warn("Firebase SDK not loaded");
+      dbgLog("Firebase SDK 読み込み失敗(スクリプトタグを確認)");
       setCloudStatus("local");
       return;
     }
@@ -992,16 +1017,26 @@
       fbApp = firebase.initializeApp(firebaseConfig);
       fbAuth = firebase.auth();
       cloudDb = firebase.firestore();
-    } catch(e){ console.warn("firebase init failed", e); setCloudStatus("local"); return; }
+      dbgLog("firebase初期化 OK (projectId=" + firebaseConfig.projectId + ")");
+    } catch(e){ dbgLog("firebase初期化 失敗: " + e.message); setCloudStatus("local"); return; }
 
     setCloudStatus("signedout");
     document.getElementById("signin-gate").classList.add("visible");
 
-    fbAuth.getRedirectResult().catch(function(err){
+    dbgLog("getRedirectResult 確認中… (現在のURL: " + location.href + ")");
+    fbAuth.getRedirectResult().then(function(result){
+      if (result && result.user){
+        dbgLog("getRedirectResult: サインイン成功 (" + result.user.email + ")");
+      } else {
+        dbgLog("getRedirectResult: user=null(リダイレクト情報なし、または未処理)");
+      }
+    }).catch(function(err){
+      dbgLog("getRedirectResult エラー: " + err.code + " / " + err.message);
       toast("サインインでエラーが発生しました(" + err.code + ")");
     });
 
     fbAuth.onAuthStateChanged(function(user){
+      dbgLog("onAuthStateChanged: " + (user ? user.email : "(signed out)"));
       cloudUser = user;
       if (!user){
         document.getElementById("signin-gate").classList.add("visible");
