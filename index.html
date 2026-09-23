@@ -1052,15 +1052,45 @@
     });
   }
 
-  function doGoogleSignIn(){
-    if (!fbAuth) return;
-    var provider = new firebase.auth.GoogleAuthProvider();
-    // signInWithRedirect (not signInWithPopup): iOS Safari blocks/kills popup-based
-    // OAuth flows unreliably, redirect is the flow Firebase itself recommends on mobile.
-    fbAuth.signInWithRedirect(provider).catch(function(err){
-      toast("サインインに失敗しました(" + err.code + ")");
-    });
+function doGoogleSignIn(){
+  if (!fbAuth) {
+    dbgLog("fbAuth is not initialized yet");
+    return;
   }
+
+  var provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({
+    prompt: "select_account"
+  });
+
+  fbAuth.signInWithPopup(provider)
+    .then(function(result) {
+      dbgLog("Google popup sign-in success: " + (result.user && result.user.email));
+      if (result && result.user) {
+        cloudUser = result.user;
+        document.getElementById("signin-gate").classList.remove("visible");
+        document.getElementById("signin-email").textContent = result.user.email || "";
+        document.getElementById("signout-btn").style.display = "inline-flex";
+        setCloudStatus("connecting");
+        startComponentsSync();
+      }
+    })
+    .catch(function(error) {
+      dbgLog("Google popup sign-in failed: " + error.code + " / " + error.message);
+
+      // ポップアップがブロックされた場合だけ redirect にフォールバック
+      if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
+        dbgLog("Popup blocked, falling back to redirect flow");
+        fbAuth.signInWithRedirect(provider).catch(function(redirectError) {
+          dbgLog("Redirect fallback failed: " + redirectError.code + " / " + redirectError.message);
+          toast("サインインに失敗しました: " + redirectError.message);
+        });
+        return;
+      }
+
+      toast("サインインに失敗しました: " + error.message);
+    });
+}
   function doSignOut(){
     if (fbAuth) fbAuth.signOut();
   }
