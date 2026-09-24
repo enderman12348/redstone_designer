@@ -343,15 +343,14 @@
     white-space: nowrap;
   }
   .comp-del {
-    opacity: 0;
     background: none;
     border: none;
     color: var(--text-faint);
     font-size: 13px;
     padding: 2px 4px;
     border-radius: 4px;
+    flex-shrink: 0;
   }
-  .comp-item:hover .comp-del { opacity: 1; }
   .comp-del:hover { color: var(--danger); background: var(--bg); }
 
   #eraser-item {
@@ -373,6 +372,7 @@
     background: var(--grid-bg);
     position: relative;
   }
+  #canvas-wrap.panning { cursor: grabbing; user-select: none; }
   #canvas-pad {
     display: inline-block;
     padding: 60px;
@@ -639,35 +639,38 @@
   .inv-clear:hover { color: var(--danger); }
 
   /* ---------- Admin: edit / reorder affordances ---------- */
-  .comp-drag-handle {
-    color: var(--text-faint);
-    font-size: 12px;
-    cursor: grab;
-    padding: 0 2px;
-    flex-shrink: 0;
+  .reorder-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 9px;
+    width: 16px;
+    height: 14px;
     line-height: 1;
+    padding: 0;
+    border-radius: 3px;
+    flex-shrink: 0;
   }
-  .comp-item.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
-  .comp-item.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
-  .comp-edit {
-    opacity: 0;
+  .reorder-btn:hover { background: var(--bg-tertiary); color: var(--text); }
+  .reorder-btn:disabled { opacity: 0.25; cursor: default; }
+  .reorder-btn:disabled:hover { background: none; }
+  .group-header .reorder-btn { margin-right: 1px; }
+  .comp-item > .reorder-btn:first-child,
+  .comp-item > .reorder-btn:nth-child(2) {
+    margin-right: 1px;
+  }
+  /* 編集・削除・インベントリ追加ボタンはホバーでのみ表示すると
+     タッチ端末(hoverが発生しない)では事実上押せなくなるため、常時表示にする */
+  .comp-edit, .comp-to-inv {
     background: none;
     border: none;
     color: var(--text-faint);
     font-size: 11px;
-    padding: 2px 4px;
+    padding: 2px 5px;
     border-radius: 4px;
+    flex-shrink: 0;
   }
-  .comp-item:hover .comp-edit { opacity: 1; }
-  .comp-edit:hover { color: var(--accent); background: var(--bg); }
-  .group-header { position: relative; }
-  .group-header.drag-over-top { box-shadow: inset 0 2px 0 var(--accent); }
-  .group-header.drag-over-bottom { box-shadow: inset 0 -2px 0 var(--accent); }
-  .group-drag-handle {
-    color: var(--text-faint);
-    font-size: 12px;
-    cursor: grab;
-  }
+  .comp-edit:hover, .comp-to-inv:hover { color: var(--accent); background: var(--bg); }
   .admin-only-hint {
     padding: 6px 8px 0;
     color: var(--text-faint);
@@ -1471,7 +1474,7 @@ function doGoogleSignIn(){
   }
 
   // ---------------- Rendering: palette ----------------
-  var dragPayload = null; // フォールバック用(一部ブラウザでdataTransfer.getDataがdragover中に読めないため)
+  var dragPayload = null; // インベントリへのドラッグ割り当て用(並べ替えはボタン方式に変更したためこちらだけで使用)
 
   function persistComponentDelete(comp){
     if (cloudDb){
@@ -1484,17 +1487,19 @@ function doGoogleSignIn(){
     }
   }
 
-  function reorderWithinGroup(groupName, draggedId, targetId, before){
+  // ドラッグ&ドロップはiOS/iPadOS(タッチ操作)では発火しないため、
+  // 並べ替えは「掴んで動かす」方式ではなく「▲▼ボタンで隣と入れ替える」方式にしている。
+  function moveComponentInGroup(groupName, compId, direction){
     var groupItems = state.components.filter(function(c){ return c.group === groupName; })
       .sort(function(a,b){ return (a.order||0) - (b.order||0); });
     var others = state.components.filter(function(c){ return c.group !== groupName; });
-    var fromIdx = groupItems.findIndex(function(c){ return c.id === draggedId; });
-    if (fromIdx === -1) return;
-    var moved = groupItems.splice(fromIdx, 1)[0];
-    var toIdx = groupItems.findIndex(function(c){ return c.id === targetId; });
-    if (toIdx === -1) toIdx = groupItems.length;
-    groupItems.splice(before ? toIdx : toIdx + 1, 0, moved);
-    groupItems.forEach(function(c, idx){ c.order = idx; });
+    var idx = groupItems.findIndex(function(c){ return c.id === compId; });
+    var swapIdx = idx + direction;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= groupItems.length) return;
+    var tmp = groupItems[idx];
+    groupItems[idx] = groupItems[swapIdx];
+    groupItems[swapIdx] = tmp;
+    groupItems.forEach(function(c, i){ c.order = i; });
     state.components = others.concat(groupItems);
     if (cloudDb){
       cloudSaveComponentOrder(groupItems.map(function(c){ return c.id; }));
@@ -1504,14 +1509,14 @@ function doGoogleSignIn(){
     renderPalette();
   }
 
-  function reorderGroups(draggedGroup, targetGroup, before){
+  function moveGroup(groupName, direction){
     var list = orderedGroups();
-    var fromIdx = list.indexOf(draggedGroup);
-    if (fromIdx === -1) return;
-    list.splice(fromIdx, 1);
-    var toIdx = list.indexOf(targetGroup);
-    if (toIdx === -1) toIdx = list.length;
-    list.splice(before ? toIdx : toIdx + 1, 0, draggedGroup);
+    var idx = list.indexOf(groupName);
+    var swapIdx = idx + direction;
+    if (idx === -1 || swapIdx < 0 || swapIdx >= list.length) return;
+    var tmp = list[idx];
+    list[idx] = list[swapIdx];
+    list[swapIdx] = tmp;
     state.groupOrder = list;
     cloudSaveGroupOrder(list);
     renderPalette();
@@ -1550,66 +1555,54 @@ function doGoogleSignIn(){
       groups[c.group].push(c);
     });
     Object.keys(groups).forEach(function(g){ groups[g].sort(function(a,b){ return (a.order||0) - (b.order||0); }); });
+    var groupNames = orderedGroups().filter(function(g){ return groups[g]; });
 
-    orderedGroups().forEach(function(groupName){
-      if (!groups[groupName]) return;
+    groupNames.forEach(function(groupName, groupIdx){
       var header = document.createElement("div");
       header.className = "group-header";
       header.innerHTML =
-        (admin ? '<span class="group-drag-handle" draggable="true" title="ドラッグでジャンルを並べ替え">⠿</span>' : '') +
+        (admin ?
+          '<button class="reorder-btn" data-dir="-1" title="ジャンルを上へ"' + (groupIdx === 0 ? ' disabled' : '') + '>▲</button>' +
+          '<button class="reorder-btn" data-dir="1" title="ジャンルを下へ"' + (groupIdx === groupNames.length - 1 ? ' disabled' : '') + '>▼</button>'
+          : '') +
         '<span class="chev">▾</span><span>' + esc(groupName) + '</span>';
       var itemsWrap = document.createElement("div");
       itemsWrap.className = "group-items";
 
       header.addEventListener("click", function(e){
-        if (e.target.classList.contains("group-drag-handle")) return;
+        if (e.target.classList.contains("reorder-btn")) return;
         header.classList.toggle("collapsed");
         itemsWrap.classList.toggle("collapsed");
       });
 
       if (admin){
-        var handle = header.querySelector(".group-drag-handle");
-        handle.addEventListener("dragstart", function(e){
-          dragPayload = { type: "group", group: groupName };
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", "group:" + groupName);
-        });
-        header.addEventListener("dragover", function(e){
-          if (!dragPayload || dragPayload.type !== "group" || dragPayload.group === groupName) return;
-          e.preventDefault();
-          var rect = header.getBoundingClientRect();
-          var before = (e.clientY - rect.top) < rect.height / 2;
-          header.classList.toggle("drag-over-top", before);
-          header.classList.toggle("drag-over-bottom", !before);
-        });
-        header.addEventListener("dragleave", function(){
-          header.classList.remove("drag-over-top", "drag-over-bottom");
-        });
-        header.addEventListener("drop", function(e){
-          header.classList.remove("drag-over-top", "drag-over-bottom");
-          if (!dragPayload || dragPayload.type !== "group" || dragPayload.group === groupName) return;
-          e.preventDefault();
-          var rect = header.getBoundingClientRect();
-          var before = (e.clientY - rect.top) < rect.height / 2;
-          reorderGroups(dragPayload.group, groupName, before);
-          dragPayload = null;
+        header.querySelectorAll(".reorder-btn").forEach(function(btn){
+          btn.addEventListener("click", function(e){
+            e.stopPropagation();
+            moveGroup(groupName, parseInt(btn.dataset.dir, 10));
+          });
         });
       }
 
-      groups[groupName].forEach(function(comp){
+      groups[groupName].forEach(function(comp, compIdx){
         var item = document.createElement("div");
         var isActive = state.activeTool && state.activeTool !== "eraser" && state.activeTool.compId === comp.id;
         item.className = "comp-item" + (isActive ? " active" : "");
-        item.draggable = true; // 誰でもインベントリへドラッグできるようにする
+        item.draggable = true; // インベントリへドラッグして割り当てるために誰でもドラッグ元になる
         var iconUrl = (comp.variants[0] && comp.variants[0].icon) || placeholderIcon(comp.name);
         item.innerHTML =
-          (admin ? '<span class="comp-drag-handle" title="ドラッグで並べ替え">⠿</span>' : '') +
+          (admin ?
+            '<button class="reorder-btn" data-dir="-1" title="上へ"' + (compIdx === 0 ? ' disabled' : '') + '>▲</button>' +
+            '<button class="reorder-btn" data-dir="1" title="下へ"' + (compIdx === groups[groupName].length - 1 ? ' disabled' : '') + '>▼</button>'
+            : '') +
           '<div class="comp-icon" style="background-image:url(\'' + iconUrl + '\')"></div>' +
           '<div class="comp-name">' + esc(comp.name) + '</div>' +
+          '<button class="comp-to-inv" title="インベントリの空きスロットへ追加">＋</button>' +
           (admin ? '<button class="comp-edit" title="編集">編集</button><button class="comp-del" title="削除">✕</button>' : '');
 
         item.addEventListener("click", function(e){
-          if (e.target.classList.contains("comp-del") || e.target.classList.contains("comp-edit")) return;
+          if (e.target.classList.contains("comp-del") || e.target.classList.contains("comp-edit") ||
+              e.target.classList.contains("reorder-btn") || e.target.classList.contains("comp-to-inv")) return;
           var prevVariant = 0;
           if (state.activeTool && state.activeTool !== "eraser" && state.activeTool.compId === comp.id){
             prevVariant = state.activeTool.v;
@@ -1619,31 +1612,25 @@ function doGoogleSignIn(){
           renderToolPanel();
         });
 
+        // インベントリへの割り当て操作を2通り用意する:
+        // (1) PC向けの補助操作としてドラッグ&ドロップ(下のdragstart)
+        // (2) タッチ端末でも確実に使える「＋」ボタン(空きスロットへ追加)
+        item.querySelector(".comp-to-inv").addEventListener("click", function(e){
+          e.stopPropagation();
+          assignComponentToFirstEmptySlot(comp.id);
+        });
         item.addEventListener("dragstart", function(e){
           dragPayload = { type: "comp", compId: comp.id, group: groupName };
-          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.effectAllowed = "copy";
           e.dataTransfer.setData("text/plain", "comp:" + comp.id);
         });
+
         if (admin){
-          item.addEventListener("dragover", function(e){
-            if (!dragPayload || dragPayload.type !== "comp" || dragPayload.group !== groupName || dragPayload.compId === comp.id) return;
-            e.preventDefault();
-            var rect = item.getBoundingClientRect();
-            var before = (e.clientY - rect.top) < rect.height / 2;
-            item.classList.toggle("drag-over-top", before);
-            item.classList.toggle("drag-over-bottom", !before);
-          });
-          item.addEventListener("dragleave", function(){
-            item.classList.remove("drag-over-top", "drag-over-bottom");
-          });
-          item.addEventListener("drop", function(e){
-            item.classList.remove("drag-over-top", "drag-over-bottom");
-            if (!dragPayload || dragPayload.type !== "comp" || dragPayload.group !== groupName || dragPayload.compId === comp.id) return;
-            e.preventDefault();
-            var rect = item.getBoundingClientRect();
-            var before = (e.clientY - rect.top) < rect.height / 2;
-            reorderWithinGroup(groupName, dragPayload.compId, comp.id, before);
-            dragPayload = null;
+          item.querySelectorAll(".reorder-btn").forEach(function(btn){
+            btn.addEventListener("click", function(e){
+              e.stopPropagation();
+              moveComponentInGroup(groupName, comp.id, parseInt(btn.dataset.dir, 10));
+            });
           });
           item.querySelector(".comp-edit").addEventListener("click", function(e){
             e.stopPropagation();
@@ -1673,6 +1660,18 @@ function doGoogleSignIn(){
   // ---------------- Inventory (hotbar) ----------------
   // パレットとは別枠の少数スロット。管理者が初期状態を設定できるが、各ユーザーの
   // 割り当て変更はページを開いている間だけの一時的な記憶で、保存・同期はしない。
+  function assignComponentToFirstEmptySlot(compId){
+    var idx = state.inventory.findIndex(function(s){ return !s; });
+    if (idx === -1){
+      toast("インベントリに空きスロットがありません(✕で空けてから追加してください)");
+      return;
+    }
+    state.inventory[idx] = { compId: compId, v: 0 };
+    state.inventoryUserModified = true;
+    renderInventory();
+    toast("インベントリに追加しました");
+  }
+
   function inventoryIconUrl(slot){
     if (!slot) return "";
     var comp = findComponent(slot.compId);
@@ -1846,6 +1845,7 @@ function doGoogleSignIn(){
   }
 
   document.getElementById("grid").addEventListener("pointerdown", function(e){
+    if (e.button !== 0) return; // 右ボタン(パン/バリエーション変更)は別のリスナーで扱う
     var cell = e.target.closest(".cell");
     if (!cell) return;
     longPressFired = false;
@@ -1880,12 +1880,53 @@ function doGoogleSignIn(){
     applyCellVisual(cell, x, y);
   });
 
-  document.getElementById("grid").addEventListener("contextmenu", function(e){
-    var cell = e.target.closest(".cell");
-    if (!cell) return;
-    e.preventDefault();
-    cycleVariant(cell);
+  // ---------------- 右クリック: 画面移動(パン) / バリエーション変更 ----------------
+  // ・右ボタンを押したまま動かす → キャンバスをパン(何もない場所からでも、配置済みマスの上からでも可)
+  // ・動かさずに離す → その位置が配置済みマスなら、これまで通りバリエーションを切り替える
+  var canvasWrapEl = document.getElementById("canvas-wrap");
+  var rightDrag = null; // {pointerId, startX, startY, startScrollLeft, startScrollTop, moved, cell}
+  var RIGHT_DRAG_MOVE_TOLERANCE = 6;
+
+  canvasWrapEl.addEventListener("contextmenu", function(e){
+    e.preventDefault(); // ブラウザの右クリックメニューは常に抑制する
   });
+
+  canvasWrapEl.addEventListener("pointerdown", function(e){
+    if (e.button !== 2) return;
+    e.preventDefault();
+    rightDrag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startScrollLeft: canvasWrapEl.scrollLeft,
+      startScrollTop: canvasWrapEl.scrollTop,
+      moved: false,
+      cell: e.target.closest(".cell")
+    };
+    try { canvasWrapEl.setPointerCapture(e.pointerId); } catch(err){}
+  });
+
+  canvasWrapEl.addEventListener("pointermove", function(e){
+    if (!rightDrag || e.pointerId !== rightDrag.pointerId) return;
+    var dx = e.clientX - rightDrag.startX, dy = e.clientY - rightDrag.startY;
+    if (!rightDrag.moved && Math.sqrt(dx*dx + dy*dy) < RIGHT_DRAG_MOVE_TOLERANCE) return;
+    rightDrag.moved = true;
+    canvasWrapEl.classList.add("panning");
+    canvasWrapEl.scrollLeft = rightDrag.startScrollLeft - dx;
+    canvasWrapEl.scrollTop = rightDrag.startScrollTop - dy;
+  });
+
+  function endRightDrag(e){
+    if (!rightDrag || (e && e.pointerId !== rightDrag.pointerId)) return;
+    canvasWrapEl.classList.remove("panning");
+    if (!rightDrag.moved && rightDrag.cell){
+      cycleVariant(rightDrag.cell); // 動かさずに離した場合は、従来どおりバリエーションを切り替える
+    }
+    try { canvasWrapEl.releasePointerCapture(rightDrag.pointerId); } catch(err){}
+    rightDrag = null;
+  }
+  canvasWrapEl.addEventListener("pointerup", endRightDrag);
+  canvasWrapEl.addEventListener("pointercancel", endRightDrag);
 
   // ---------------- Zoom ----------------
   document.getElementById("zoom-in").addEventListener("click", function(){
